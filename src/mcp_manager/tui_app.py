@@ -236,8 +236,9 @@ class MCPManagerTUI(App):
     
     def __init__(self):
         super().__init__()
-        # Initialize core components
-        self.registry = MCPServerRegistry()
+        # Initialize core components with correct path
+        registry_path = Path(__file__).parent.parent.parent / "mcp-servers.json"
+        self.registry = MCPServerRegistry(registry_path)
         self.deployment_manager = DeploymentManager(self.registry)
         self.platform_manager = PlatformManager()
         self.project_detector = ProjectDetector()
@@ -382,9 +383,15 @@ class MCPManagerTUI(App):
         # Status bar with view mode indicator and quick help
         yield Static("Ready | 📦 Registry View", id="status-bar")
         
-        # Quick help panel
-        self.quick_help_panel = self.help_system.create_quick_help_panel()
-        yield self.quick_help_panel
+        # Quick help panel (with fallback)
+        if self.help_system:
+            try:
+                self.quick_help_panel = self.help_system.create_quick_help_panel()
+                yield self.quick_help_panel
+            except Exception:
+                # Fallback: Create a simple static help panel
+                yield Static("Press F1 for help | A:Add E:Edit D:Deploy R:Refresh Q:Quit", 
+                           classes="help-tip", id="fallback-help")
         
         yield Footer()
     
@@ -414,12 +421,21 @@ class MCPManagerTUI(App):
         # Start background health monitoring
         self.health_monitor.start_background_monitoring()
         
-        # Initialize help system and show onboarding if needed
-        self.help_system.setup_help_system()
-        if self.onboarding_system.should_show_onboarding():
-            self.onboarding_system.start_onboarding(
-                on_complete=lambda: self.update_status("Welcome to MCP Manager! Press F1 for help anytime.")
-            )
+        # Initialize help system and show onboarding if needed (with safety checks)
+        if self.help_system:
+            try:
+                self.help_system.setup_help_system()
+            except Exception as e:
+                self.update_status(f"Help system initialization failed: {e}")
+        
+        if self.onboarding_system:
+            try:
+                if self.onboarding_system.should_show_onboarding():
+                    self.onboarding_system.start_onboarding(
+                        on_complete=lambda: self.update_status("Welcome to MCP Manager! Press F1 for help anytime.")
+                    )
+            except Exception as e:
+                self.update_status(f"Onboarding system failed: {e}")
     
     def on_unmount(self) -> None:
         """Clean up when app is unmounted."""
@@ -429,17 +445,41 @@ class MCPManagerTUI(App):
     
     def load_server_registry(self) -> None:
         """Load servers into the registry table."""
-        table = self.query_one("#server-table", DataTable)
-        table.clear()
-        
-        if not table.columns:
-            table.add_columns("Server Name", "Type", "Status")
-        
-        # Load servers from registry
-        servers = self.registry.list_servers()
-        for server_name, server in servers.items():
-            status = "✅ Enabled" if server.metadata.enabled else "❌ Disabled"
-            table.add_row(server_name, server.type, status)
+        try:
+            table = self.query_one("#server-table", DataTable)
+            table.clear()
+            
+            if not table.columns:
+                table.add_columns("Server Name", "Type", "Status")
+            
+            # Debug: Show registry file path
+            registry_path = self.registry.registry_file
+            self.update_status(f"Loading servers from: {registry_path}")
+            
+            # Load servers from registry
+            servers = self.registry.list_servers()
+            self.update_status(f"Found {len(servers)} servers in registry")
+            
+            if len(servers) == 0:
+                # Debug: Check if file exists
+                if registry_path.exists():
+                    self.update_status(f"Registry file exists at {registry_path} but contains no servers")
+                else:
+                    self.update_status(f"Registry file not found at {registry_path}")
+                return
+            
+            for server_name, server in servers.items():
+                status = "✅ Enabled" if server.metadata.enabled else "❌ Disabled"
+                table.add_row(server_name, server.type, status)
+                self.update_status(f"Added server: {server_name} ({server.type})")
+                
+            self.update_status(f"Successfully loaded {table.row_count} servers into table")
+            
+        except Exception as e:
+            self.update_status(f"Error loading servers: {e}")
+            import traceback
+            self.notify(f"Registry loading error: {str(e)}\n\nTraceback:\n{traceback.format_exc()}", 
+                       title="Debug: Registry Error", timeout=15)
     
     def load_deployment_status(self) -> None:
         """Refresh the interactive deployment matrix."""
@@ -479,11 +519,21 @@ class MCPManagerTUI(App):
     def action_add_server(self) -> None:
         """Add a new server."""
         try:
-            # For now, just show a simple status message
-            # TODO: Implement full server add dialog
-            self.update_status("Add server: Press Ctrl+C to create a new server entry")
+            # Check current server count for context
+            servers = self.registry.list_servers()
+            current_count = len(servers)
+            
+            # Show helpful status message with current state
+            self.update_status(f"Add Server (A): Currently have {current_count} servers. Full add dialog coming soon - use CLI for now: 'mcp-manager add <name> --type stdio --command python'")
+            
+            # Optional: Show available server types as a hint
+            server_types = ["stdio", "sse", "http", "docker"]
+            type_hint = ", ".join(server_types)
+            self.notify(f"Supported server types: {type_hint}", title="Add Server Help", timeout=5)
+            
         except Exception as e:
             self.update_status(f"Add server error: {e}")
+            self.notify("Add server failed: Could not access registry", title="Error", timeout=3)
     
     # Help System Actions
     def action_show_help(self) -> None:
@@ -625,8 +675,10 @@ class MCPManagerTUI(App):
                 rollback_data={"server_names": server_names, "platform_keys": platform_keys}
             )
             
+            # Create a lambda that captures the arguments
             self.current_operation = self.run_worker(
-                self.deploy_worker, server_names, platform_keys, thread=True, exclusive=True
+                lambda: self.deploy_worker(server_names, platform_keys), 
+                thread=True, exclusive=True
             )
             self._start_operation("Deploying servers...")
             
@@ -704,8 +756,7 @@ class MCPManagerTUI(App):
     def run_health_check(self, server_names: List[str]) -> None:
         """Start health check operation with worker thread."""
         self.current_operation = self.run_worker(
-            self.health_check_worker,
-            server_names,
+            lambda: self.health_check_worker(server_names),
             thread=True,
             exclusive=True
         )
@@ -894,8 +945,7 @@ class MCPManagerTUI(App):
             
         operation = "deploy" if deploy else "undeploy"
         self.current_operation = self.run_worker(
-            self.single_deployment_worker,
-            server_name, platform_key, deploy,
+            lambda: self.single_deployment_worker(server_name, platform_key, deploy),
             thread=True,
             exclusive=True
         )
@@ -950,8 +1000,7 @@ class MCPManagerTUI(App):
             return
             
         self.current_operation = self.run_worker(
-            self.batch_deployment_worker,
-            deployments,
+            lambda: self.batch_deployment_worker(deployments),
             thread=True,
             exclusive=True
         )
@@ -1097,12 +1146,12 @@ class MCPManagerTUI(App):
     def action_edit_server(self) -> None:
         """Edit selected server (E key)."""
         if self.current_pane != "server":
-            self.update_status("Switch to server pane to edit servers")
+            self.update_status("Switch to server pane to edit servers (Tab key)")
             return
         
         server_table = self.query_one("#server-table", DataTable)
         if server_table.cursor_row is None:
-            self.update_status("No server selected for editing")
+            self.update_status("No server selected - use arrow keys to select a server, then press E to edit")
             return
         
         try:
@@ -1112,12 +1161,26 @@ class MCPManagerTUI(App):
             server = self.registry.get_server(server_name)
             if server:
                 enabled_status = "enabled" if server.metadata.enabled else "disabled"
-                self.update_status(f"Edit '{server_name}' ({server.type}, {enabled_status}): Press Ctrl+E to modify")
+                self.update_status(f"Edit Server (E): '{server_name}' ({server.type}, {enabled_status})")
+                
+                # Show detailed server information in a notification
+                details = f"Server: {server_name}\nType: {server.type}\nStatus: {enabled_status}"
+                if server.command:
+                    details += f"\nCommand: {server.command}"
+                if server.args:
+                    details += f"\nArgs: {' '.join(server.args)}"
+                if server.metadata.description:
+                    details += f"\nDescription: {server.metadata.description}"
+                
+                details += f"\n\nTo edit: Use CLI command 'mcp-manager update {server_name}' or modify mcp-servers.json directly"
+                self.notify(details, title=f"Server Details: {server_name}", timeout=10)
             else:
                 self.update_status(f"Server '{server_name}' not found in registry")
+                self.notify("Server not found in registry. This may indicate a data loading issue.", title="Error", timeout=5)
             self.has_changes = True
-        except (IndexError, ValueError):
-            self.update_status("Failed to get selected server")
+        except (IndexError, ValueError) as e:
+            self.update_status(f"Failed to get selected server: {e}")
+            self.notify("Could not retrieve server information. Try refreshing with R key.", title="Error", timeout=5)
     
     def action_remove_server(self) -> None:
         """Remove selected server (Delete key)."""
@@ -1224,26 +1287,43 @@ class MCPManagerTUI(App):
         status_bar = self.query_one("#status-bar", Static)
         timestamp = datetime.now().strftime("%H:%M:%S")
         
-        # Get help text from help system
-        help_text = self.help_system.get_status_bar_help(self.current_pane)
+        # Get help text from help system (with fallback)
+        if self.help_system:
+            try:
+                help_text = self.help_system.get_status_bar_help(self.current_pane)
+            except Exception:
+                help_text = "A:Add E:Edit D:Deploy R:Refresh Q:Quit"
+        else:
+            help_text = "A:Add E:Edit D:Deploy R:Refresh Q:Quit"
         
         status_bar.update(f"[{timestamp}] {message} | {help_text}")
     
     def update_context_help(self) -> None:
         """Update context-sensitive help in status bar."""
-        # Update quick help panel
-        if hasattr(self, 'help_system') and hasattr(self, 'quick_help_panel'):
-            self.help_system.update_quick_help(self.current_pane)
+        # Update quick help panel (with safety checks)
+        if hasattr(self, 'help_system') and self.help_system and hasattr(self, 'quick_help_panel'):
+            try:
+                self.help_system.update_quick_help(self.current_pane)
+            except Exception:
+                pass  # Silently fail to avoid disrupting the UI
         
         # Update status bar with new help text
         status_bar = self.query_one("#status-bar", Static)
         current_text = str(status_bar.renderable)
+        
+        # Get help text with fallback
+        if self.help_system:
+            try:
+                help_text = self.help_system.get_status_bar_help(self.current_pane)
+            except Exception:
+                help_text = "A:Add E:Edit D:Deploy R:Refresh Q:Quit"
+        else:
+            help_text = "A:Add E:Edit D:Deploy R:Refresh Q:Quit"
+        
         if "|" in current_text:
             message_part = current_text.split("|")[0].strip()
-            help_text = self.help_system.get_status_bar_help(self.current_pane)
             status_bar.update(f"{message_part} | {help_text}")
         else:
-            help_text = self.help_system.get_status_bar_help(self.current_pane)
             status_bar.update(f"{current_text} | {help_text}")
     
     # View Mode Management
@@ -1456,7 +1536,10 @@ class MCPManagerTUI(App):
             # Deploy immediately to usual platforms
             platforms = quick_option["platforms"]
             self.update_status(f"Quick deploying {server_name} to {', '.join(platforms)}...")
-            self.run_worker(self._deploy_server_to_platforms, server_name, platforms)
+            self.run_worker(
+                lambda: self._run_async_deployment(server_name, platforms),
+                thread=True
+            )
             
         except (IndexError, ValueError):
             self.update_status("Please select a valid server")
@@ -1492,6 +1575,19 @@ class MCPManagerTUI(App):
         except Exception as e:
             self.update_status(f"Smart deployment failed: {e}")
     
+    def _run_async_deployment(self, server_name: str, platforms: List[str]) -> None:
+        """Synchronous wrapper for async deployment (for worker threads)."""
+        import asyncio
+        
+        # Create event loop for this thread
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        try:
+            loop.run_until_complete(self._deploy_server_to_platforms(server_name, platforms))
+        finally:
+            loop.close()
+    
     async def _deploy_server_to_platforms(self, server_name: str, platforms: List[str]) -> None:
         """Deploy a specific server to specific platforms."""
         try:
@@ -1506,24 +1602,24 @@ class MCPManagerTUI(App):
                     success_count += 1
                 except Exception as e:
                     error_count += 1
-                    logger.error(f"Failed to deploy {server_name} to {platform}: {e}")
+                    logging.error(f"Failed to deploy {server_name} to {platform}: {e}")
             
             # Record results for learning
             overall_success = error_count == 0
             self.record_deployment_success(server_name, platforms, overall_success)
             
             if success_count == len(platforms):
-                self.update_status(f"✓ Successfully deployed {server_name} to all platforms")
+                self.call_from_thread(self.update_status, f"✓ Successfully deployed {server_name} to all platforms")
             elif success_count > 0:
-                self.update_status(f"⚠ Partially deployed {server_name}: {success_count}/{len(platforms)} succeeded")
+                self.call_from_thread(self.update_status, f"⚠ Partially deployed {server_name}: {success_count}/{len(platforms)} succeeded")
             else:
-                self.update_status(f"✗ Failed to deploy {server_name} to any platform")
+                self.call_from_thread(self.update_status, f"✗ Failed to deploy {server_name} to any platform")
             
             # Refresh the deployment matrix
-            self.action_refresh()
+            self.call_from_thread(self.action_refresh)
             
         except Exception as e:
-            self.update_status(f"Deployment error: {e}")
+            self.call_from_thread(self.update_status, f"Deployment error: {e}")
             self.record_deployment_success(server_name, platforms, False)
     
     async def _simulate_deployment(self, server_name: str, platform: str) -> None:
