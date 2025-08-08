@@ -1,0 +1,30 @@
+{
+  "mcpServers": {
+    "test-server-1": {
+      "type": "stdio",
+      "command": "python",
+      "args": [
+        "-m",
+        "test_server"
+      ],
+      "env": {},
+      "url": null,
+      "image": null,
+      "metadata": {
+        "description": "Test server 1 for health monitoring",
+        "tags": [],
+        "created": "2025-08-08",
+        "enabled": true,
+        "last_modified": "2025-08-08"
+      }
+    }
+  },
+  "registry": {
+    "version": "1.0",
+    "default_targets": [
+      "claude_desktop",
+      "claude_code"
+    ],
+    "last_updated": "2025-08-08T09:29:43.667689"
+  }
+}

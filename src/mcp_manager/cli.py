@@ -31,7 +31,7 @@ console = Console()
 # Create Typer app
 app = typer.Typer(
     name="mcp-manager",
-    help="🔧 Professional MCP (Model Context Protocol) manager with TUI and CLI interface",
+    help="Professional MCP (Model Context Protocol) manager with TUI and CLI interface",
     add_completion=False,
     rich_markup_mode="rich"
 )
@@ -148,8 +148,46 @@ def main():
     app()
 
 
-# CLI Commands follow here (truncated for brevity)...
-# The rest of the original CLI commands would go here
+@app.command()
+def tui(
+    enhanced: bool = typer.Option(False, "--enhanced", "-e", help="Launch enhanced TUI with full CRUD operations")
+):
+    """Launch the Textual TUI interface."""
+    if enhanced:
+        try:
+            from .tui_enhanced import run_enhanced_tui
+            console.print("[bold green]Launching Enhanced TUI with full CRUD operations...[/bold green]")
+            return run_enhanced_tui()
+        except ImportError:
+            console.print("[yellow]Enhanced TUI unavailable, falling back to basic TUI.[/yellow]")
+            from .tui_app import run_tui
+            return run_tui()
+    else:
+        try:
+            from .tui_app import run_tui
+            console.print("[bold blue]Launching Basic TUI...[/bold blue]")
+            return run_tui()
+        except ImportError:
+            console.print("[bold red]TUI unavailable. Please check your installation.[/bold red]")
+            return 1
+
+@app.command()
+def interactive():
+    """Launch interactive configuration mode."""
+    try:
+        return run_interactive_mode()
+    except ImportError:
+        console.print("[bold red]Interactive mode unavailable. Please check your installation.[/bold red]")
+        return 1
+
+@app.callback()
+def main_callback(
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose logging")
+):
+    """Professional MCP (Model Context Protocol) manager with TUI and CLI interface"""
+    setup_logging(verbose)
+
+# CLI Commands would go here for other functionality...
 
 if __name__ == "__main__":
     main()

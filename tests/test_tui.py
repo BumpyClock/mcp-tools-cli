@@ -6,7 +6,7 @@ from pathlib import Path
 import sys
 sys.path.insert(0, 'src')
 
-from mcp_manager.tui import MCPManagerTUI
+from mcp_manager.tui_app import MCPManagerTUI
 
 
 class TestMCPManagerTUI:

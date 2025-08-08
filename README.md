@@ -6,6 +6,7 @@
 
 - **🎮 Interactive & Command-Line**: Both guided interactive menus AND traditional CLI arguments
 - **🚀 Modern CLI**: Beautiful terminal interface with rich output using Typer
+- **⌨️ Comprehensive Keyboard Shortcuts**: Full keyboard navigation with context-sensitive shortcuts
 - **🔄 Bidirectional Sync**: Push/pull configurations between `mcp-servers.json` and `~/.claude.json`
 - **🌐 Platform Management**: Manage MCP servers across Claude Desktop, Claude Code, VSCode, and more
 - **➕ Custom Server Management**: Add your own MCP servers manually with interactive configuration
@@ -121,6 +122,41 @@ Each operation includes:
 - **🔄 Sync servers**: Copy servers between platforms (Claude Desktop ↔ Claude Code ↔ VSCode)
 - **❌ Remove servers**: Uninstall servers from selected platforms
 - **📋 Installation matrix**: View which servers are installed on which platforms
+
+### 🖥️ TUI Interface
+
+Launch the Text User Interface for visual management:
+
+```bash
+# Start the full-featured TUI
+mcp-sync tui
+```
+
+#### ⌨️ Keyboard Shortcuts
+
+The TUI provides comprehensive keyboard navigation:
+
+**Primary Actions:**
+- `A` - Add new server
+- `E` - Edit selected server  
+- `D` - Deploy server(s)
+- `R` - Refresh data
+- `H` - Health check
+- `Q` - Quit (with confirmation)
+
+**Navigation:**
+- `Tab` / `Shift+Tab` - Switch between panes
+- `Enter` - Context-sensitive action
+- `Escape` - Cancel operation
+- `Space` - Toggle server selection
+
+**Context-Sensitive:**
+- `Delete` - Remove server (in server pane)
+- `U` - Undeploy server (in deployment pane)
+
+📋 All shortcuts are shown in the status bar with context-sensitive help!
+
+For complete details see: [docs/keyboard-shortcuts.md](docs/keyboard-shortcuts.md)
 
 ## Command-Line Mode
 
